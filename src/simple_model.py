@@ -2,7 +2,7 @@ import pickle
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, RandomSampler
 import pytorch_lightning as pl
 import os
 
@@ -148,12 +148,12 @@ class GPT(pl.LightningModule):
         return [optimizer],[]
     
     def training_step(self, batch, _):
-        if self.global_step%5000==0:
+        if self.global_step%1000==0:
             with torch.no_grad():
                 self.eval()
                 device=self.device
                 context = torch.zeros((1, 1), dtype=torch.long,device=device)
-                print(f"\n output_step_{self.global_step}",self.to_text(self.sample(context,50)))
+                print(f"\n output_step_{self.global_step}",self.to_text(self.sample(context,150)))
         self.train()
         x,y=batch
         logits=self(x)
@@ -192,19 +192,34 @@ if __name__ == '__main__':
     decoder_block=DecoderBlock(128,8,0.1,0.1,0.1)
     vocable_size=len(data1.idx_to_char)
     gpt1=GPT(vocable_size,256,512,dataset=data1)
-    gpt1=torch.compile(gpt1)
+    # not supported yet
+    # gpt1=torch.compile(gpt1)
     context = torch.zeros((1, 1), dtype=torch.long)
+    #sample without training
     print(gpt1.sample(context,100))
     print(data1.to_string(gpt1.sample(context,50)))
     print(gpt1.generate_text(context,50))
-    trainer=pl.Trainer(max_epochs=1,precision=16,enable_checkpointing=True,max_steps=10000)
-    trainer.fit(gpt1,DataLoader(data1))
-    #pickle save the model
-    with open("gpt1.pkl","wb") as f:
-        pickle.dump(gpt1,f)
-    gpt1.load_from_checkpoint("./lightning_logs/version_9/checkpoints/epoch=0-step=217608.ckpt")
+    #TRainer
+    trainer=pl.Trainer(max_epochs=2,precision="16-mixed",enable_checkpointing=True)
+    # Sampler makes training faster and more stable
+    random_sampler=RandomSampler(data1)
+    train_loader=DataLoader(data1,sampler=random_sampler,num_workers=6,pin_memory=True,batch_size=32)
+    trainer.fit(gpt1,train_loader)
     
-    print(data1.to_string(gpt1.sample(context,50)))
-    print(gpt1.generate_text(context=context,max_token=150))
-    # print(len(data1.idx_to_char))
-    # print(data1.char_to_idx)
+    #pickle save the model
+    #yes this is not optimal to use pickel
+    
+    # with open("gpt1.pkl","wb") as f:
+    #     pickle.dump(gpt1,f)
+
+
+    # with open("gpt1.pkl","rb") as g:
+    #     gpt1=pickle.load(g)
+    # print(data1.to_string(gpt1.sample(context,50)))
+    with open("example_output.txt","w") as f:
+        for i in range(10):
+            text=gpt1.generate_text(context,100)
+            print(text)
+            f.write(f"Example output {i}:\n")
+            f.write(text)
+            f.write("\n")
